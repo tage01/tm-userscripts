@@ -5,7 +5,9 @@ więc Tampermonkey sam sprawdza i pobiera nowe wersje z tego repo.
 
 ## Instalacja
 
-Otwórz w przeglądarce link raw do wybranego skryptu, np.:
+Najwygodniej przez stronę z przyciskami „Zainstaluj”: https://tage01.github.io/tm-userscripts/
+
+Albo otwórz w przeglądarce link raw do wybranego skryptu, np.:
 
 https://raw.githubusercontent.com/tage01/tm-userscripts/main/03_filmweb/naglowki/anti-clickbait.user.js
 
