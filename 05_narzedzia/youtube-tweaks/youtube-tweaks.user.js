@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.5
+// @version      1.0.6
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
@@ -23,7 +23,8 @@
         explore: 'ytTweaks.hideExplore',
         history: 'ytTweaks.hideHistory',
         queue: 'ytTweaks.watchQueue',
-        speeds: 'ytTweaks.channelSpeeds'
+        speeds: 'ytTweaks.channelSpeeds',
+        diagnostics: 'ytTweaks.diagnostics'
     };
 
     const settings = {
@@ -32,6 +33,78 @@
         explore: GM_getValue(KEYS.explore, false),
         history: GM_getValue(KEYS.history, false)
     };
+
+    let diagnosticsEnabled = GM_getValue(KEYS.diagnostics, false);
+    const diagnosticBuffer = [];
+    const DIAGNOSTIC_SELECTOR = [
+        '.yt-tweaks-card-action',
+        'ytd-menu-renderer',
+        'yt-icon-button[aria-label]',
+        'ytd-menu-popup-renderer',
+        'ytd-menu-service-item-renderer',
+        'ytd-menu-navigation-item-renderer',
+        'tp-yt-paper-item',
+        '[role="menuitem"]'
+    ].join(',');
+
+    function safeDiagnosticLabel(value) {
+        const label = (value || '').replace(/\s+/g, ' ').trim();
+        const normalized = label.toLocaleLowerCase().replace(/[’‘]/g, "'");
+        return /^(action menu|more actions|more options|menu akcji|więcej działań|więcej opcji|not interested|nie interesuje mnie|nie jestem zainteresowany|don't recommend channel|nie polecaj (tego )?kanału)$/i.test(normalized)
+            ? label.slice(0, 80)
+            : undefined;
+    }
+
+    function diagnosticNodeSummary(element) {
+        if (!(element instanceof Element)) return { type: typeof element };
+        const summary = {
+            tag: element.tagName.toLocaleLowerCase(),
+            role: element.getAttribute('role') || undefined
+        };
+        const ownAction = element.matches('.yt-tweaks-card-action')
+            ? (element.getAttribute('aria-label') || '').slice(0, 80)
+            : safeDiagnosticLabel(element.getAttribute('aria-label'));
+        if (ownAction) summary.label = ownAction;
+        if (element.matches('ytd-menu-service-item-renderer, ytd-menu-navigation-item-renderer, tp-yt-paper-item, [role="menuitem"]')) {
+            const menuText = safeDiagnosticLabel(element.innerText || element.textContent);
+            if (menuText) summary.menuText = menuText;
+        }
+        return summary;
+    }
+
+    function diagnosticLog(eventName, details = {}) {
+        if (!diagnosticsEnabled) return;
+        const entry = { time: new Date().toISOString(), event: eventName, ...details };
+        diagnosticBuffer.push(entry);
+        if (diagnosticBuffer.length > 250) diagnosticBuffer.shift();
+        console.info('[YT Tweaks][diag]', JSON.stringify(entry));
+    }
+
+    function captureDiagnosticEvent(event) {
+        if (!diagnosticsEnabled) return;
+        const path = event.composedPath().filter(node => node instanceof Element);
+        const relevant = path.filter(node => node.matches(DIAGNOSTIC_SELECTOR));
+        if (!relevant.length) return;
+        diagnosticLog('dom-event', {
+            type: event.type,
+            isTrusted: event.isTrusted,
+            detail: event.detail || 0,
+            button: Number.isInteger(event.button) ? event.button : undefined,
+            target: diagnosticNodeSummary(path[0]),
+            relevantPath: relevant.slice(0, 8).map(diagnosticNodeSummary)
+        });
+    }
+
+    function toggleDiagnostics() {
+        diagnosticsEnabled = !diagnosticsEnabled;
+        GM_setValue(KEYS.diagnostics, diagnosticsEnabled);
+        if (diagnosticsEnabled) diagnosticBuffer.length = 0;
+        console.info(`[YT Tweaks][diag] Logowanie ${diagnosticsEnabled ? 'włączone' : 'wyłączone'}.`);
+    }
+
+    function dumpDiagnostics() {
+        console.info('[YT Tweaks][diag] Pełny bufor:', JSON.stringify(diagnosticBuffer));
+    }
 
     // Tagi rendererów i endpointy są stabilniejsze od klas, ale YouTube może je zmienić.
     // Teksty etykiet są fallbackiem zależnym od języka interfejsu.
@@ -325,7 +398,9 @@
     async function runRecommendationAction(card, button, action) {
         if (button.disabled) return;
         const menuButton = cardMenuButton(card);
+        diagnosticLog('shortcut-activated', { action: action.key });
         if (!menuButton) {
+            diagnosticLog('card-menu-control-not-found', { action: action.key });
             button.disabled = true;
             button.dataset.actionResult = 'unavailable';
             button.title = `Menu niedostępne — ${action.label}`;
@@ -346,21 +421,30 @@
         button.title = `Otwieram menu — ${action.label}`;
         button.setAttribute('aria-label', `Otwieram menu — ${action.label}`);
         try {
+            diagnosticLog('script-click', { stage: 'card-menu-control', target: diagnosticNodeSummary(menuButton) });
             menuButton.click();
             const menuItem = await waitForMenuItem(action);
+            diagnosticLog('menu-option-result', {
+                action: action.key,
+                found: Boolean(menuItem),
+                target: menuItem ? diagnosticNodeSummary(menuItem) : undefined
+            });
             if (!menuItem) {
                 document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
                 button.dataset.actionResult = 'unavailable';
                 button.title = `Opcja niedostępna — ${action.label}`;
                 button.setAttribute('aria-label', `Opcja niedostępna — ${action.label}`);
             } else {
-                nativeClickTarget(menuItem)?.click();
+                const clickTarget = nativeClickTarget(menuItem);
+                diagnosticLog('script-click', { stage: 'menu-option', target: diagnosticNodeSummary(clickTarget) });
+                clickTarget?.click();
                 button.dataset.actionResult = 'success';
                 button.title = `Wykonano — ${action.label}`;
                 button.setAttribute('aria-label', `Wykonano — ${action.label}`);
             }
         } catch (error) {
             console.warn('[YouTube Tweaks] Nie udało się wykonać akcji rekomendacji.', error);
+            diagnosticLog('script-error', { action: action.key, message: String(error).slice(0, 180) });
             button.dataset.actionResult = 'error';
             button.title = `Nie udało się — ${action.label}`;
             button.setAttribute('aria-label', `Nie udało się — ${action.label}`);
@@ -570,6 +654,8 @@
         });
         GM_registerMenuCommand('Pokaż kolejkę „Do obejrzenia”', showQueuePanel);
         GM_registerMenuCommand('Zapisz bieżącą prędkość dla kanału', saveCurrentChannelSpeed);
+        GM_registerMenuCommand('Włącz / wyłącz diagnostykę kliknięć', toggleDiagnostics);
+        GM_registerMenuCommand('Pokaż bufor diagnostyczny w konsoli', dumpDiagnostics);
     }
 
     function scanPage() {
@@ -589,6 +675,10 @@
 
     registerMenus();
     scanPage();
+
+    ['pointerdown', 'pointerup', 'click'].forEach(type => {
+        document.addEventListener(type, captureDiagnosticEvent, true);
+    });
 
     document.addEventListener('yt-navigate-finish', () => {
         scheduleScan();
