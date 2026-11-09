@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.3
+// @version      1.0.4
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
@@ -247,17 +247,23 @@
         return svg;
     }
 
-    function isRendered(element) {
-        if (!element?.isConnected || !element.getClientRects().length) return false;
-        const style = getComputedStyle(element);
-        return style.display !== 'none' && style.visibility !== 'hidden'
-            && !element.closest('[hidden], [aria-hidden="true"]');
-    }
-
     function nativeClickTarget(element) {
         if (!element) return null;
         if (element.matches('button, [role="button"], tp-yt-paper-item')) return element;
         return element.querySelector('button, [role="button"], tp-yt-paper-item') || element;
+    }
+
+    function isActuallyVisible(element) {
+        if (!element?.isConnected || element.closest('[hidden], [aria-hidden="true"]')) return false;
+        for (let ancestor = element; ancestor && ancestor !== document.documentElement; ancestor = ancestor.parentElement) {
+            const style = getComputedStyle(ancestor);
+            if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) <= 0.01) return false;
+        }
+        const target = nativeClickTarget(element);
+        const rect = target.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0
+            && rect.bottom > 0 && rect.right > 0
+            && rect.top < window.innerHeight && rect.left < window.innerWidth;
     }
 
     function visibleMenuItem(action) {
@@ -269,7 +275,7 @@
             for (const item of root.querySelectorAll(selector)) {
                 if (seen.has(item)) continue;
                 seen.add(item);
-                if (isRendered(item) && action.matches(normalizedText(item))) return item;
+                if (action.matches(normalizedText(item)) && isActuallyVisible(item)) return item;
             }
         }
         return null;
@@ -310,7 +316,7 @@
             const label = (element.getAttribute('aria-label') || '').toLocaleLowerCase();
             return /action menu|more actions|more options|menu|więcej|działania|opcji/.test(label);
         });
-        return nativeClickTarget(actionMenu || candidates.find(isRendered) || candidates[0]);
+        return nativeClickTarget(actionMenu || candidates.find(isActuallyVisible) || candidates[0]);
     }
 
     async function runRecommendationAction(card, button, action) {

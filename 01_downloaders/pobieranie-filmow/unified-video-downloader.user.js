@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Unified Video Downloader
 // @namespace    http://tampermonkey.net/
-// @version      1.6
+// @version      1.7
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/01_downloaders/pobieranie-filmow/unified-video-downloader.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/01_downloaders/pobieranie-filmow/unified-video-downloader.user.js
-// @description  Zunifikowany downloader wideo: eporner + KVS (webpussi/camgirlfap/porn4fans/pimpbunny/sheeshfans) + tnaflix + dirtyship + mat6tube + freemiumgirls + thotchicks (AES+HLS) + pornx (packer+HLS) + yesporn (iframe player-x) + fallback generyczny + mini-kolejka
+// @description  Zunifikowany downloader wideo: eporner + KVS (webpussi/camgirlfap/porn4fans/pimpbunny/sheeshfans) + tnaflix + dirtyship + mat6tube + freemiumgirls + thotchicks (AES+HLS) + pornx (packer+HLS) + yesporn (iframe player-x) + livecamrips (MixDrop) + fallback generyczny + mini-kolejka
 // @author       opencode
 // @match        *://*.eporner.com/hd-porn/*
 // @match        *://*.eporner.com/video-*
@@ -56,6 +56,8 @@
 // @match        *://*.drtuber.com/*
 // @match        *://*.nuvid.com/*
 // @match        *://*.yespornpleasexxx.com/*
+// @match        *://livecamrips.to/*
+// @match        *://*.livecamrips.to/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=eporner.com
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
@@ -103,6 +105,12 @@
 // @connect      yespornpleasexxx.com
 // @connect      pornsexnvideos.com
 // @connect      *.pornsexnvideos.com
+// @connect      livecamrips.to
+// @connect      mdzsmutpcvykb.net
+// @connect      mxdrop.click
+// @connect      *.mxdrop.click
+// @connect      mxcontent.net
+// @connect      *.mxcontent.net
 // @connect      tnaflix.com
 // @connect      *
 // @run-at       document-idle
@@ -291,7 +299,7 @@
         showUiCancel(ui, true);
         dlState.request = GM_xmlhttpRequest({
             method: 'GET', url: source.url, responseType: 'blob', timeout: 600000,
-            headers: { Referer: location.href },
+            headers: { Referer: source.referer || location.href },
             onprogress: (e) => {
                 if (e.total > 0) {
                     const pct = Math.round((e.loaded / e.total) * 100);
@@ -933,6 +941,37 @@
     // getSources() -> Promise<[{kind:'mp4'|'hls', label, url, ext?, referer?, getPlaylist?}]>
     // Dla HLS: url = master m3u8, getPlaylist() = async () => {url, text} ze ŚWIEŻYM tokenem.
 
+    // Pobiera jak gmFetchText, ale zwraca też finalUrl (po redirectach embeda)
+    function gmFetchFull(url, referer) {
+        return new Promise((resolve, reject) => {
+            GM_xmlhttpRequest({
+                method: 'GET', url, timeout: 60000,
+                headers: { Referer: referer || location.href },
+                onload: (r) => {
+                    if (r.status >= 200 && r.status < 300) resolve({ text: r.responseText, finalUrl: r.finalUrl || url });
+                    else reject(new Error('HTTP ' + r.status));
+                },
+                onerror: () => reject(new Error('Błąd sieci')),
+                ontimeout: () => reject(new Error('Timeout')),
+            });
+        });
+    }
+
+    // livecamrips: iframe#iframe-video -> embed (mdzsmutpcvykb.net -> mxdrop.click, MixDrop)
+    // -> packer Dean Edwards -> MDCore.wurl = //…mxcontent.net/v2/ID.mp4?s=…&e=… (token ~4 h).
+    // Plik wymaga User-Agent + Referer embeda (inaczej 403).
+    async function livecamripsResolve() {
+        const frame = document.querySelector('iframe#iframe-video') || document.querySelector('iframe[src*="/e/"]');
+        const src = frame ? frame.getAttribute('src') || '' : '';
+        if (!src || src === 'about:blank') return [];
+        const embed = await gmFetchFull(new URL(src, location.href).href, location.href);
+        const clean = deobfuscatePacked(embed.text);
+        const m = clean.match(/MDCore\.wurl\s*=\s*"([^"]+)"/);
+        if (!m) throw new Error('Nie znaleziono strumienia MixDrop (MDCore.wurl)');
+        const url = m[1].startsWith('//') ? 'https:' + m[1] : m[1];
+        return [{ kind: 'mp4', label: 'MP4', url, ext: 'mp4', referer: embed.finalUrl }];
+    }
+
     const ADAPTERS = [
         {
             id: 'eporner', label: 'Eporner',
@@ -1261,6 +1300,13 @@
             },
         },
         {
+            id: 'livecamrips', label: 'LiveCamRips', blobFirst: true,
+            test: (h) => h.includes('livecamrips.to'),
+            getTitle: () => titleFromSelectors('h1', null),
+            getSources: livecamripsResolve,
+            refresh: livecamripsResolve,
+        },
+        {
             id: 'generic', label: 'Auto',
             test: () => true, // fallback dla każdej innej domeny
             getTitle: () => titleFromSelectors(null, null),
@@ -1488,14 +1534,22 @@
             let s = getSel();
             if (!s) return;
             if (s.kind === 'mp4' && adapter.blobFirst) {
-                // KVS: tokeny jednorazowe — odśwież źródła w MOMENCIE KLIKU (nie cache'uj!),
-                // pobierz blobem z Referer, a gdy serwer odda HTML, cofnij się do URL-a z playera
-                const fresh = kvsExtractSources();
-                if (fresh.length) {
-                    const sameQ = fresh.find((f) => f.label === s.label) || fresh[0];
-                    if (sameQ) s = sameQ;
+                // Tokeny jednorazowe — odśwież źródła w MOMENCIE KLIKU (nie cache'uj!),
+                // pobierz blobem z Referer
+                if (adapter.refresh) {
+                    try { const fresh = await adapter.refresh(); if (fresh && fresh.length) s = fresh[0]; }
+                    catch (e) { log('refresh źródła błąd:', e); }
                 }
-                const live = kvsLiveUrl();
+                let live = null;
+                if (adapter.id === 'kvs') {
+                    // KVS: gdy serwer odda HTML, cofnij się do URL-a z playera
+                    const fresh = kvsExtractSources();
+                    if (fresh.length) {
+                        const sameQ = fresh.find((f) => f.label === s.label) || fresh[0];
+                        if (sameQ) s = sameQ;
+                    }
+                    live = kvsLiveUrl();
+                }
                 downloadMp4(s, fnameFor(s), ui, true, live && live !== s.url ? live : null);
                 return;
             }
