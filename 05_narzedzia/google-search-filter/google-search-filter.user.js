@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Search – filtr wyników
 // @namespace    opencode.google-search-filter
-// @version      1.2.0
+// @version      1.3.0
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/google-search-filter/google-search-filter.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/google-search-filter/google-search-filter.user.js
 // @description  Ukrywa wyniki z wybranych domen i oferuje skróty wyszukiwania site:.
@@ -21,7 +21,8 @@
     ads: 'gsf_hide_ads'
   };
   const hiddenDisplay = new WeakMap();
-  const AI_HEADING_RE = /^(?:AI Overview|Przegląd AI|Odpowiedź trybu AI|AI Mode|Tryb AI):?$/i;
+  const AI_OVERVIEW_TITLE_RE = /^(?:AI Overview|Przegląd(?: od)? AI|AI Mode|Tryb AI):?$/i;
+  const AI_HEADING_RE = /^(?:AI Overview|Przegląd(?: od)? AI|Odpowiedź trybu AI|AI Mode|Tryb AI):?$/i;
   let scanTimer = 0;
   let refreshPanel = () => {};
 
@@ -358,10 +359,23 @@
     const search = document.querySelector('#search');
     if (!search) return [];
     const blocks = new Set();
-    // Nagłówki AI są zależne od języka; kontener `[data-hveid]` jest zmienny i opisany jako wrażliwy.
+    // Nagłówki AI są zależne od języka. Szukaj najmniejszego wspólnego kontenera tytułu
+    // i kontrolki „Pokaż więcej”, żeby ukryć też nagłówek, cytowania i przyciski modułu.
     search.querySelectorAll('h1, h2, h3, [role="heading"]').forEach(heading => {
       if (!AI_HEADING_RE.test((heading.innerText || heading.textContent || '').trim())) return;
-      const block = heading.closest('[data-hveid]') || heading.parentElement?.parentElement;
+      let block = null;
+      for (let ancestor = heading.parentElement; ancestor && ancestor !== search; ancestor = ancestor.parentElement) {
+        const hasOverviewTitle = [...ancestor.querySelectorAll('h1, h2, h3, [role="heading"]')]
+          .some(item => AI_OVERVIEW_TITLE_RE.test((item.innerText || item.textContent || '').trim()));
+        const hasExpandControl = [...ancestor.querySelectorAll('button, [role="button"], a')]
+          .some(item => /^(?:Pokaż więcej|Show more)$/i.test((item.innerText || item.textContent || '').trim()));
+        if (hasOverviewTitle && hasExpandControl) {
+          block = ancestor;
+          break;
+        }
+      }
+      // Fallback dla wariantów AI bez kontrolki rozwijania.
+      block ||= heading.closest('section') || heading.closest('[data-hveid]') || heading.parentElement?.parentElement;
       if (block && search.contains(block)) blocks.add(block);
     });
     return [...blocks];
