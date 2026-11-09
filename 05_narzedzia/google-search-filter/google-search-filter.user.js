@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google Search – filtr wyników
 // @namespace    opencode.google-search-filter
-// @version      1.1.0
+// @version      1.2.0
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/google-search-filter/google-search-filter.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/google-search-filter/google-search-filter.user.js
 // @description  Ukrywa wyniki z wybranych domen i oferuje skróty wyszukiwania site:.
@@ -95,6 +95,22 @@
     location.assign(url.href);
   }
 
+  function toggleSite(site) {
+    let query = getCurrentQuery().trim();
+    if (!query) query = (prompt('Wpisz szukane hasło:') || '').trim();
+    if (!query) return;
+
+    const siteFilter = `site:${site}`;
+    const tokens = query.split(/\s+/).filter(Boolean);
+    const wasActive = tokens.some(token => token.toLowerCase() === siteFilter.toLowerCase());
+    const nextTokens = tokens.filter(token => !/^site:(?:reddit\.com|github\.com)$/i.test(token));
+    if (!wasActive) nextTokens.push(siteFilter);
+
+    const url = new URL('/search', location.origin);
+    url.searchParams.set('q', nextTokens.join(' '));
+    location.assign(url.href);
+  }
+
   function searchOnForums() {
     const domain = normalizeDomain(prompt('Podaj domenę forum (np. forum.example):'));
     if (domain) searchOnSite(domain);
@@ -142,6 +158,7 @@
       .action:hover { background: #eef2f7; }
       .primary { border-color: #1a73e8; color: #fff; background: #1a73e8; }
       .primary:hover { background: #1558b0; }
+      .site-toggle[aria-pressed="true"] { border-color: #1a73e8; color: #fff; background: #1a73e8; }
       .domain-list { display: grid; gap: 4px; max-height: 128px; overflow: auto; margin: 7px 0 0; padding: 0; list-style: none; }
       .domain-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 6px; border-radius: 5px; background: #f8f9fa; }
       .domain-name { min-width: 0; overflow-wrap: anywhere; }
@@ -176,8 +193,8 @@
           <button class="action" type="submit">Forum</button>
         </form>
         <div class="search-buttons">
-          <button class="action" id="search-reddit" type="button">Reddit</button>
-          <button class="action" id="search-github" type="button">GitHub</button>
+          <button class="action site-toggle" id="search-reddit" type="button" aria-pressed="false">Reddit</button>
+          <button class="action site-toggle" id="search-github" type="button" aria-pressed="false">GitHub</button>
         </div>
         <p class="hint">Filtr site: zostanie dopisany do bieżącego zapytania.</p>
       </section>
@@ -218,6 +235,9 @@
     refreshPanel = () => {
       shadow.querySelector('#toggle-ai').checked = !!GM_getValue(KEYS.ai, false);
       shadow.querySelector('#toggle-ads').checked = !!GM_getValue(KEYS.ads, false);
+      const queryTokens = getCurrentQuery().toLowerCase().split(/\s+/);
+      shadow.querySelector('#search-reddit').setAttribute('aria-pressed', String(queryTokens.includes('site:reddit.com')));
+      shadow.querySelector('#search-github').setAttribute('aria-pressed', String(queryTokens.includes('site:github.com')));
       renderDomains();
     };
 
@@ -259,8 +279,8 @@
       }
       searchOnSite(domain);
     });
-    shadow.querySelector('#search-reddit').addEventListener('click', () => searchOnSite('reddit.com'));
-    shadow.querySelector('#search-github').addEventListener('click', () => searchOnSite('github.com'));
+    shadow.querySelector('#search-reddit').addEventListener('click', () => toggleSite('reddit.com'));
+    shadow.querySelector('#search-github').addEventListener('click', () => toggleSite('github.com'));
     refreshPanel();
   }
 
