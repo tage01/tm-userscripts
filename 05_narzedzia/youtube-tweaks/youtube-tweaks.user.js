@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.4
+// @version      1.0.5
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
@@ -60,6 +60,9 @@
             width: 32px; height: 32px; padding: 0;
         }
         .yt-tweaks-recommendation-button svg { width: 18px; height: 18px; display: block; }
+        .yt-tweaks-recommendation-button[data-action-result="success"] { background: #245b37; }
+        .yt-tweaks-recommendation-button[data-action-result="unavailable"],
+        .yt-tweaks-recommendation-button[data-action-result="error"] { background: #6b2828; }
         #yt-tweaks-queue-panel {
             position: fixed; inset: 72px 20px auto auto; z-index: 2147483647;
             width: min(420px, calc(100vw - 32px)); max-height: min(70vh, 620px);
@@ -323,10 +326,14 @@
         if (button.disabled) return;
         const menuButton = cardMenuButton(card);
         if (!menuButton) {
+            button.disabled = true;
+            button.dataset.actionResult = 'unavailable';
             button.title = `Menu niedostępne — ${action.label}`;
             button.setAttribute('aria-label', `Menu niedostępne — ${action.label}`);
             setTimeout(() => {
                 if (button.isConnected) {
+                    button.disabled = false;
+                    delete button.dataset.actionResult;
                     button.title = action.label;
                     button.setAttribute('aria-label', action.label);
                 }
@@ -335,6 +342,7 @@
         }
 
         button.disabled = true;
+        button.dataset.actionResult = 'pending';
         button.title = `Otwieram menu — ${action.label}`;
         button.setAttribute('aria-label', `Otwieram menu — ${action.label}`);
         try {
@@ -342,21 +350,25 @@
             const menuItem = await waitForMenuItem(action);
             if (!menuItem) {
                 document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                button.dataset.actionResult = 'unavailable';
                 button.title = `Opcja niedostępna — ${action.label}`;
                 button.setAttribute('aria-label', `Opcja niedostępna — ${action.label}`);
             } else {
                 nativeClickTarget(menuItem)?.click();
+                button.dataset.actionResult = 'success';
                 button.title = `Wykonano — ${action.label}`;
                 button.setAttribute('aria-label', `Wykonano — ${action.label}`);
             }
         } catch (error) {
             console.warn('[YouTube Tweaks] Nie udało się wykonać akcji rekomendacji.', error);
+            button.dataset.actionResult = 'error';
             button.title = `Nie udało się — ${action.label}`;
             button.setAttribute('aria-label', `Nie udało się — ${action.label}`);
         } finally {
             setTimeout(() => {
                 if (!button.isConnected) return;
                 button.disabled = false;
+                delete button.dataset.actionResult;
                 button.title = action.label;
                 button.setAttribute('aria-label', action.label);
             }, 1500);
