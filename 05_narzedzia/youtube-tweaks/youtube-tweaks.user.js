@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.0
+// @version      1.0.1
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
-// @description  Ukrywa wybrane elementy YouTube, pamięta prędkość kanałów i prowadzi kolejkę do obejrzenia.
+// @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
 // @match        *://www.youtube.com/*
 // @match        *://m.youtube.com/*
 // @grant        GM_addStyle
@@ -43,13 +43,23 @@
     };
 
     GM_addStyle(`
-        .yt-tweaks-queue-button {
+        .yt-tweaks-card-actions {
             position: absolute; inset-block-start: 8px; inset-inline-end: 8px; z-index: 20;
+            display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start;
+            gap: 4px; max-width: calc(100% - 16px);
+        }
+        .yt-tweaks-card-action {
             border: 0; border-radius: 18px; padding: 7px 10px; color: #fff;
             background: rgba(20, 20, 20, .88); font: 500 12px Roboto, Arial, sans-serif;
-            cursor: pointer; opacity: .94;
+            cursor: pointer; opacity: .94; white-space: nowrap;
         }
-        .yt-tweaks-queue-button:hover { background: #303030; }
+        .yt-tweaks-card-action:hover { background: #303030; }
+        .yt-tweaks-card-action:disabled { cursor: progress; opacity: .8; }
+        .yt-tweaks-card-action.yt-tweaks-recommendation-button {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 32px; height: 32px; padding: 0;
+        }
+        .yt-tweaks-recommendation-button svg { width: 18px; height: 18px; display: block; }
         #yt-tweaks-queue-panel {
             position: fixed; inset: 72px 20px auto auto; z-index: 2147483647;
             width: min(420px, calc(100vw - 32px)); max-height: min(70vh, 620px);
@@ -207,16 +217,172 @@
         button.dataset.queued = String(isQueued);
     }
 
+    const RECOMMENDATION_ACTIONS = {
+        notInterested: {
+            label: 'Nie interesuje mnie',
+            icon: 'thumb-down',
+            matches: text => /not interested|nie interesuje mnie|nie jestem zainteresowany/i.test(text)
+        },
+        noChannel: {
+            label: 'Nie polecaj kanału',
+            icon: 'person-off',
+            matches: text => /don't recommend channel|don’t recommend channel|nie polecaj (tego )?kanału/i.test(text)
+        }
+    };
+
+    function createRecommendationIcon(name) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('focusable', 'false');
+
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        path.setAttribute('fill', 'currentColor');
+        path.setAttribute('d', name === 'thumb-down'
+            ? 'M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z'
+            : 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm0 2c-4.42 0-8 2.24-8 5v1h10.2a6 6 0 0 1-.2-1.5c0-1.54.58-2.94 1.53-4.01A15.5 15.5 0 0 0 12 14zm8.3.3 1.4 1.4-1.8 1.8 1.8 1.8-1.4 1.4-1.8-1.8-1.8 1.8-1.4-1.4 1.8-1.8-1.8-1.8 1.4-1.4 1.8 1.8 1.8-1.8z');
+        svg.appendChild(path);
+        return svg;
+    }
+
+    function isRendered(element) {
+        if (!element?.isConnected || !element.getClientRects().length) return false;
+        const style = getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden'
+            && !element.closest('[hidden], [aria-hidden="true"]');
+    }
+
+    function visibleMenuItem(action) {
+        const selector = 'ytd-menu-service-item-renderer, ytd-menu-navigation-item-renderer, tp-yt-paper-item, [role="menuitem"]';
+        const popup = document.querySelector('ytd-popup-container');
+        const roots = popup ? [popup, document] : [document];
+        const seen = new Set();
+        for (const root of roots) {
+            for (const item of root.querySelectorAll(selector)) {
+                if (seen.has(item)) continue;
+                seen.add(item);
+                if (isRendered(item) && action.matches(normalizedText(item))) return item;
+            }
+        }
+        return null;
+    }
+
+    function waitForMenuItem(action, timeoutMs = 2500) {
+        const existing = visibleMenuItem(action);
+        if (existing) return Promise.resolve(existing);
+
+        return new Promise(resolve => {
+            let finished = false;
+            const finish = item => {
+                if (finished) return;
+                finished = true;
+                observer.disconnect();
+                clearInterval(poll);
+                clearTimeout(timeout);
+                resolve(item);
+            };
+            const check = () => {
+                const item = visibleMenuItem(action);
+                if (item) finish(item);
+            };
+            const observer = new MutationObserver(check);
+            observer.observe(document.body, { childList: true, subtree: true });
+            // Krótki polling jest fallbackiem dla popupów renderowanych wewnątrz Shadow DOM.
+            const poll = setInterval(check, 100);
+            const timeout = setTimeout(() => finish(null), timeoutMs);
+            check();
+        });
+    }
+
+    function cardMenuButton(card) {
+        const menu = card.querySelector('ytd-menu-renderer');
+        if (!menu) return null;
+        const candidates = [...menu.querySelectorAll('button[aria-label], [role="button"][aria-label], yt-icon-button[aria-label], #button')];
+        const actionMenu = candidates.find(element => {
+            const label = (element.getAttribute('aria-label') || '').toLocaleLowerCase();
+            return /action menu|more actions|more options|menu|więcej|działania|opcji/.test(label);
+        });
+        return actionMenu || candidates.find(isRendered) || candidates[0] || null;
+    }
+
+    async function runRecommendationAction(card, button, action) {
+        if (button.disabled) return;
+        const menuButton = cardMenuButton(card);
+        if (!menuButton) {
+            button.title = `Menu niedostępne — ${action.label}`;
+            button.setAttribute('aria-label', `Menu niedostępne — ${action.label}`);
+            setTimeout(() => {
+                if (button.isConnected) {
+                    button.title = action.label;
+                    button.setAttribute('aria-label', action.label);
+                }
+            }, 1600);
+            return;
+        }
+
+        button.disabled = true;
+        button.title = `Otwieram menu — ${action.label}`;
+        button.setAttribute('aria-label', `Otwieram menu — ${action.label}`);
+        try {
+            menuButton.click();
+            const menuItem = await waitForMenuItem(action);
+            if (!menuItem) {
+                document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+                button.title = `Opcja niedostępna — ${action.label}`;
+                button.setAttribute('aria-label', `Opcja niedostępna — ${action.label}`);
+            } else {
+                menuItem.click();
+                button.title = `Wykonano — ${action.label}`;
+                button.setAttribute('aria-label', `Wykonano — ${action.label}`);
+            }
+        } catch (error) {
+            console.warn('[YouTube Tweaks] Nie udało się wykonać akcji rekomendacji.', error);
+            button.title = `Nie udało się — ${action.label}`;
+            button.setAttribute('aria-label', `Nie udało się — ${action.label}`);
+        } finally {
+            setTimeout(() => {
+                if (!button.isConnected) return;
+                button.disabled = false;
+                button.title = action.label;
+                button.setAttribute('aria-label', action.label);
+            }, 1500);
+        }
+    }
+
+    function makeRecommendationButton(action) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'yt-tweaks-card-action yt-tweaks-recommendation-button';
+        button.title = action.label;
+        button.setAttribute('aria-label', action.label);
+        button.appendChild(createRecommendationIcon(action.icon));
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const card = button.closest(SELECTORS.queueCards);
+            if (!card) return;
+            runRecommendationAction(card, button, action);
+        });
+        return button;
+    }
+
     function updateQueueButtons() {
         const queued = new Set(readQueue().map(item => item.videoId));
         document.querySelectorAll(SELECTORS.queueCards).forEach(card => {
             const info = getCardVideo(card);
             if (!info) return;
-            let button = info.anchor.querySelector(':scope > .yt-tweaks-queue-button');
+            let toolbar = info.anchor.querySelector(':scope > .yt-tweaks-card-actions');
+            if (!toolbar) {
+                toolbar = document.createElement('div');
+                toolbar.className = 'yt-tweaks-card-actions';
+                info.anchor.appendChild(toolbar);
+            }
+
+            let button = toolbar.querySelector('.yt-tweaks-queue-button');
             if (!button) {
                 button = document.createElement('button');
                 button.type = 'button';
-                button.className = 'yt-tweaks-queue-button';
+                button.className = 'yt-tweaks-card-action yt-tweaks-queue-button';
                 button.addEventListener('click', event => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -228,8 +394,15 @@
                     updateQueueButtons();
                     if (document.getElementById('yt-tweaks-queue-panel')) renderQueuePanel();
                 });
-                info.anchor.appendChild(button);
+                toolbar.appendChild(button);
             }
+
+            Object.values(RECOMMENDATION_ACTIONS).forEach(action => {
+                const exists = [...toolbar.querySelectorAll('.yt-tweaks-recommendation-button')]
+                    .some(candidate => candidate.getAttribute('aria-label') === action.label);
+                if (!exists) toolbar.appendChild(makeRecommendationButton(action));
+            });
+
             button.dataset.videoId = info.videoId;
             button.dataset.url = info.url;
             button.dataset.title = info.title;
