@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.1
+// @version      1.0.2
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
@@ -219,11 +219,13 @@
 
     const RECOMMENDATION_ACTIONS = {
         notInterested: {
+            key: 'notInterested',
             label: 'Nie interesuje mnie',
             icon: 'thumb-down',
             matches: text => /not interested|nie interesuje mnie|nie jestem zainteresowany/i.test(text)
         },
         noChannel: {
+            key: 'noChannel',
             label: 'Nie polecaj kanału',
             icon: 'person-off',
             matches: text => /don't recommend channel|don’t recommend channel|nie polecaj (tego )?kanału/i.test(text)
@@ -353,6 +355,7 @@
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'yt-tweaks-card-action yt-tweaks-recommendation-button';
+        button.dataset.ytAction = action.key;
         button.title = action.label;
         button.setAttribute('aria-label', action.label);
         button.appendChild(createRecommendationIcon(action.icon));
@@ -371,7 +374,7 @@
         document.querySelectorAll(SELECTORS.queueCards).forEach(card => {
             const info = getCardVideo(card);
             if (!info) return;
-            let toolbar = info.anchor.querySelector(':scope > .yt-tweaks-card-actions');
+            let toolbar = info.anchor.querySelector('.yt-tweaks-card-actions');
             if (!toolbar) {
                 toolbar = document.createElement('div');
                 toolbar.className = 'yt-tweaks-card-actions';
@@ -399,7 +402,7 @@
 
             Object.values(RECOMMENDATION_ACTIONS).forEach(action => {
                 const exists = [...toolbar.querySelectorAll('.yt-tweaks-recommendation-button')]
-                    .some(candidate => candidate.getAttribute('aria-label') === action.label);
+                    .some(candidate => candidate.dataset.ytAction === action.key);
                 if (!exists) toolbar.appendChild(makeRecommendationButton(action));
             });
 
