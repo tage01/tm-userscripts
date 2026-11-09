@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.2
+// @version      1.0.3
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
@@ -254,6 +254,12 @@
             && !element.closest('[hidden], [aria-hidden="true"]');
     }
 
+    function nativeClickTarget(element) {
+        if (!element) return null;
+        if (element.matches('button, [role="button"], tp-yt-paper-item')) return element;
+        return element.querySelector('button, [role="button"], tp-yt-paper-item') || element;
+    }
+
     function visibleMenuItem(action) {
         const selector = 'ytd-menu-service-item-renderer, ytd-menu-navigation-item-renderer, tp-yt-paper-item, [role="menuitem"]';
         const popup = document.querySelector('ytd-popup-container');
@@ -304,7 +310,7 @@
             const label = (element.getAttribute('aria-label') || '').toLocaleLowerCase();
             return /action menu|more actions|more options|menu|więcej|działania|opcji/.test(label);
         });
-        return actionMenu || candidates.find(isRendered) || candidates[0] || null;
+        return nativeClickTarget(actionMenu || candidates.find(isRendered) || candidates[0]);
     }
 
     async function runRecommendationAction(card, button, action) {
@@ -333,7 +339,7 @@
                 button.title = `Opcja niedostępna — ${action.label}`;
                 button.setAttribute('aria-label', `Opcja niedostępna — ${action.label}`);
             } else {
-                menuItem.click();
+                nativeClickTarget(menuItem)?.click();
                 button.title = `Wykonano — ${action.label}`;
                 button.setAttribute('aria-label', `Wykonano — ${action.label}`);
             }
