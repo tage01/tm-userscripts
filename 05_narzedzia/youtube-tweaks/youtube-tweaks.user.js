@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.6
+// @version      1.0.7
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
@@ -39,6 +39,8 @@
     const DIAGNOSTIC_SELECTOR = [
         '.yt-tweaks-card-action',
         'ytd-menu-renderer',
+        'button[aria-label]',
+        '[role="button"][aria-label]',
         'yt-icon-button[aria-label]',
         'ytd-menu-popup-renderer',
         'ytd-menu-service-item-renderer',
@@ -323,17 +325,46 @@
         return svg;
     }
 
+    function queryAllOpenRoots(root, selector) {
+        const found = new Set();
+        const visited = new Set();
+        const visit = currentRoot => {
+            if (!currentRoot?.querySelectorAll || visited.has(currentRoot)) return;
+            visited.add(currentRoot);
+            let descendants;
+            try {
+                descendants = currentRoot.querySelectorAll('*');
+                currentRoot.querySelectorAll(selector).forEach(element => found.add(element));
+            } catch (_) {
+                return;
+            }
+            descendants.forEach(element => {
+                if (element.shadowRoot) visit(element.shadowRoot);
+            });
+        };
+        visit(root);
+        return [...found];
+    }
+
     function nativeClickTarget(element) {
         if (!element) return null;
         if (element.matches('button, [role="button"], tp-yt-paper-item')) return element;
-        return element.querySelector('button, [role="button"], tp-yt-paper-item') || element;
+        return queryAllOpenRoots(element, 'button, [role="button"], tp-yt-paper-item')[0] || element;
     }
 
     function isActuallyVisible(element) {
-        if (!element?.isConnected || element.closest('[hidden], [aria-hidden="true"]')) return false;
-        for (let ancestor = element; ancestor && ancestor !== document.documentElement; ancestor = ancestor.parentElement) {
+        if (!element?.isConnected) return false;
+        let ancestor = element;
+        while (ancestor) {
+            if (ancestor.hasAttribute?.('hidden') || ancestor.getAttribute?.('aria-hidden') === 'true') return false;
             const style = getComputedStyle(ancestor);
             if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) <= 0.01) return false;
+            if (ancestor.parentElement) {
+                ancestor = ancestor.parentElement;
+            } else {
+                const root = ancestor.getRootNode?.();
+                ancestor = root?.host || null;
+            }
         }
         const target = nativeClickTarget(element);
         const rect = target.getBoundingClientRect();
@@ -344,11 +375,11 @@
 
     function visibleMenuItem(action) {
         const selector = 'ytd-menu-service-item-renderer, ytd-menu-navigation-item-renderer, tp-yt-paper-item, [role="menuitem"]';
-        const popup = document.querySelector('ytd-popup-container');
+        const popup = document.querySelector('ytd-popup-container') || queryAllOpenRoots(document, 'ytd-popup-container')[0];
         const roots = popup ? [popup, document] : [document];
         const seen = new Set();
         for (const root of roots) {
-            for (const item of root.querySelectorAll(selector)) {
+            for (const item of queryAllOpenRoots(root, selector)) {
                 if (seen.has(item)) continue;
                 seen.add(item);
                 if (action.matches(normalizedText(item)) && isActuallyVisible(item)) return item;
@@ -385,14 +416,22 @@
     }
 
     function cardMenuButton(card) {
-        const menu = card.querySelector('ytd-menu-renderer');
-        if (!menu) return null;
-        const candidates = [...menu.querySelectorAll('button[aria-label], [role="button"][aria-label], yt-icon-button[aria-label], #button')];
+        const selector = 'button[aria-label], button[title], [role="button"][aria-label], [role="button"][title], yt-icon-button[aria-label], yt-icon-button[title], ytd-menu-renderer #button';
+        const candidates = queryAllOpenRoots(card, selector);
+        const menuLabel = /action menu|actions? menu|more actions|more options|^more$|^options?$|^menu$|^więcej$|menu akcji|więcej.*(działań|opcji)|działania|działań|opcji/i;
         const actionMenu = candidates.find(element => {
-            const label = (element.getAttribute('aria-label') || '').toLocaleLowerCase();
-            return /action menu|more actions|more options|menu|więcej|działania|opcji/.test(label);
+            const label = (element.getAttribute('aria-label') || element.getAttribute('title') || '').trim();
+            return menuLabel.test(label);
         });
-        return nativeClickTarget(actionMenu || candidates.find(isActuallyVisible) || candidates[0]);
+        if (actionMenu) return nativeClickTarget(actionMenu);
+
+        const menuHosts = queryAllOpenRoots(card, 'ytd-menu-renderer');
+        for (const menu of menuHosts) {
+            const controls = queryAllOpenRoots(menu, 'button, [role="button"], yt-icon-button, #button');
+            const control = controls.find(isActuallyVisible);
+            if (control) return nativeClickTarget(control);
+        }
+        return null;
     }
 
     async function runRecommendationAction(card, button, action) {
@@ -400,7 +439,13 @@
         const menuButton = cardMenuButton(card);
         diagnosticLog('shortcut-activated', { action: action.key });
         if (!menuButton) {
-            diagnosticLog('card-menu-control-not-found', { action: action.key });
+            const labeledControls = queryAllOpenRoots(card, 'button[aria-label], [role="button"][aria-label], yt-icon-button[aria-label]');
+            diagnosticLog('card-menu-control-not-found', {
+                action: action.key,
+                cardTag: card.tagName.toLocaleLowerCase(),
+                menuRendererCount: queryAllOpenRoots(card, 'ytd-menu-renderer').length,
+                controls: labeledControls.slice(0, 12).map(diagnosticNodeSummary)
+            });
             button.disabled = true;
             button.dataset.actionResult = 'unavailable';
             button.title = `Menu niedostępne — ${action.label}`;
