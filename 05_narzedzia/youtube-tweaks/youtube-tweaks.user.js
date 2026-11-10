@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.10
+// @version      1.0.11
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
@@ -332,9 +332,14 @@
     }
 
     function setQueueButton(button, isQueued) {
-        button.textContent = isQueued ? '✓ W kolejce' : '＋ Do obejrzenia';
-        button.setAttribute('aria-label', isQueued ? 'Usuń z kolejki do obejrzenia' : 'Dodaj do kolejki do obejrzenia');
-        button.dataset.queued = String(isQueued);
+        const text = isQueued ? '✓ W kolejce' : '＋ Do obejrzenia';
+        const label = isQueued ? 'Usuń z kolejki do obejrzenia' : 'Dodaj do kolejki do obejrzenia';
+        const queued = String(isQueued);
+
+        // Nie wymieniaj węzła tekstowego przy każdym skanie MutationObservera.
+        if (button.textContent !== text) button.textContent = text;
+        if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label);
+        if (button.dataset.queued !== queued) button.dataset.queued = queued;
     }
 
     const RECOMMENDATION_ACTIONS = {
