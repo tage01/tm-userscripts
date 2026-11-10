@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.8
+// @version      1.0.9
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
@@ -162,6 +162,7 @@
             display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start;
             gap: 4px; max-width: calc(100% - 16px);
         }
+        .yt-tweaks-thumbnail-controls-host { position: relative; }
         .yt-tweaks-card-action {
             border: 0; border-radius: 18px; padding: 7px 10px; color: #fff;
             background: rgba(20, 20, 20, .88); font: 500 12px Roboto, Arial, sans-serif;
@@ -566,11 +567,17 @@
         document.querySelectorAll(SELECTORS.queueCards).forEach(card => {
             const info = getCardVideo(card);
             if (!info) return;
-            let toolbar = info.anchor.querySelector('.yt-tweaks-card-actions');
+            // Przyciski są rodzeństwem linku miniatury, nie jego dziećmi — YouTube
+            // używa granic linku do sterowania podglądem po najechaniu.
+            const toolbarHost = info.anchor.parentElement || card;
+            if (getComputedStyle(toolbarHost).position === 'static') {
+                toolbarHost.classList.add('yt-tweaks-thumbnail-controls-host');
+            }
+            let toolbar = [...toolbarHost.children].find(child => child.classList.contains('yt-tweaks-card-actions'));
             if (!toolbar) {
                 toolbar = document.createElement('div');
                 toolbar.className = 'yt-tweaks-card-actions';
-                info.anchor.appendChild(toolbar);
+                toolbarHost.appendChild(toolbar);
             }
 
             let button = toolbar.querySelector('.yt-tweaks-queue-button');
@@ -680,7 +687,7 @@
     }
 
     function saveCurrentChannelSpeed() {
-        const video = document.querySelector('video.html5-main-video, ytd-player video, video');
+        const video = document.querySelector('ytd-player video.html5-main-video, video.html5-main-video, ytd-player video');
         const key = channelKey();
         if (!video || !key) {
             console.info('[YouTube Tweaks] Otwórz film, aby zapisać prędkość kanału.');
@@ -712,14 +719,14 @@
     }
 
     function watchVideoRate() {
-        document.querySelectorAll('video.html5-main-video, ytd-player video, video').forEach(video => {
-            if (video.dataset.ytTweaksRateBound) return;
-            video.dataset.ytTweaksRateBound = '1';
-            ['loadstart', 'emptied', 'loadedmetadata', 'loadeddata', 'canplay', 'playing'].forEach(type => {
-                video.addEventListener(type, () => scheduleRateApply(video));
-            });
-            scheduleRateApply(video);
+        // Nie dotykaj wideo podglądowego kart; pamięć prędkości dotyczy playera głównego.
+        const video = document.querySelector('ytd-player video.html5-main-video, video.html5-main-video, ytd-player video');
+        if (!video || video.dataset.ytTweaksRateBound) return;
+        video.dataset.ytTweaksRateBound = '1';
+        ['loadstart', 'emptied', 'loadedmetadata', 'loadeddata', 'canplay', 'playing'].forEach(type => {
+            video.addEventListener(type, () => scheduleRateApply(video));
         });
+        scheduleRateApply(video);
     }
 
     function registerMenus() {
@@ -766,7 +773,7 @@
 
     document.addEventListener('yt-navigate-finish', () => {
         scheduleScan();
-        document.querySelectorAll('video').forEach(scheduleRateApply);
+        scheduleRateApply(document.querySelector('ytd-player video.html5-main-video, video.html5-main-video, ytd-player video'));
     });
 
     const observer = new MutationObserver(scheduleScan);
