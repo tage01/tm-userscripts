@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.7
+// @version      1.0.8
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
@@ -38,6 +38,14 @@
     const diagnosticBuffer = [];
     const DIAGNOSTIC_SELECTOR = [
         '.yt-tweaks-card-action',
+        'a#thumbnail',
+        'ytd-thumbnail',
+        'ytd-rich-item-renderer',
+        'ytd-video-renderer',
+        'ytd-grid-video-renderer',
+        'ytd-compact-video-renderer',
+        'ytd-rich-grid-media',
+        '.yt-tweaks-card-actions',
         'ytd-menu-renderer',
         'button[aria-label]',
         '[role="button"][aria-label]',
@@ -47,6 +55,17 @@
         'ytd-menu-navigation-item-renderer',
         'tp-yt-paper-item',
         '[role="menuitem"]'
+    ].join(',');
+    const HOVER_DIAGNOSTIC_SELECTOR = [
+        'a#thumbnail',
+        'ytd-thumbnail',
+        'ytd-rich-item-renderer',
+        'ytd-video-renderer',
+        'ytd-grid-video-renderer',
+        'ytd-compact-video-renderer',
+        'ytd-rich-grid-media',
+        '.yt-tweaks-card-actions',
+        '.yt-tweaks-card-action'
     ].join(',');
 
     function safeDiagnosticLabel(value) {
@@ -87,6 +106,26 @@
         const path = event.composedPath().filter(node => node instanceof Element);
         const relevant = path.filter(node => node.matches(DIAGNOSTIC_SELECTOR));
         if (!relevant.length) return;
+
+        if (/^(pointerover|pointerout|mouseover|mouseout)$/.test(event.type)) {
+            const hoverBoundary = path.find(node => node.matches(HOVER_DIAGNOSTIC_SELECTOR));
+            if (!hoverBoundary) return;
+            const related = event.relatedTarget instanceof Element ? event.relatedTarget : null;
+            const relatedBoundary = related?.closest(HOVER_DIAGNOSTIC_SELECTOR) || null;
+            // Pomijamy przejścia między dziećmi tego samego obszaru, aby log nie rósł przy ruchu kursora.
+            if (relatedBoundary === hoverBoundary) return;
+            diagnosticLog('hover-event', {
+                type: event.type,
+                isTrusted: event.isTrusted,
+                pointerType: event.pointerType || undefined,
+                boundary: diagnosticNodeSummary(hoverBoundary),
+                relatedBoundary: relatedBoundary ? diagnosticNodeSummary(relatedBoundary) : undefined,
+                target: diagnosticNodeSummary(path[0]),
+                relevantPath: relevant.slice(0, 8).map(diagnosticNodeSummary)
+            });
+            return;
+        }
+
         diagnosticLog('dom-event', {
             type: event.type,
             isTrusted: event.isTrusted,
@@ -699,7 +738,7 @@
         });
         GM_registerMenuCommand('Pokaż kolejkę „Do obejrzenia”', showQueuePanel);
         GM_registerMenuCommand('Zapisz bieżącą prędkość dla kanału', saveCurrentChannelSpeed);
-        GM_registerMenuCommand('Włącz / wyłącz diagnostykę kliknięć', toggleDiagnostics);
+        GM_registerMenuCommand('Włącz / wyłącz diagnostykę interakcji', toggleDiagnostics);
         GM_registerMenuCommand('Pokaż bufor diagnostyczny w konsoli', dumpDiagnostics);
     }
 
@@ -721,7 +760,7 @@
     registerMenus();
     scanPage();
 
-    ['pointerdown', 'pointerup', 'click'].forEach(type => {
+    ['pointerover', 'pointerout', 'mouseover', 'mouseout', 'pointerdown', 'pointerup', 'click'].forEach(type => {
         document.addEventListener(type, captureDiagnosticEvent, true);
     });
 
