@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube – Shorts i porządki w interfejsie
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.9
+// @version      1.0.10
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/youtube-tweaks/youtube-tweaks.user.js
 // @description  Porządkuje interfejs YouTube, obsługuje rekomendacje i kolejkę do obejrzenia.
@@ -317,7 +317,9 @@
     }
 
     function getCardVideo(card) {
-        const anchor = card.querySelector('a#thumbnail[href*="/watch"], a[href*="/watch?v="]');
+        // Najpierw wybierz właściwy link miniatury, niezależnie od kolejności linków w karcie.
+        const anchor = card.querySelector('a#thumbnail[href*="/watch"]')
+            || card.querySelector('a[href*="/watch?v="]');
         if (!anchor) return null;
         const url = canonicalVideoUrl(anchor.getAttribute('href'));
         if (!url) return null;
@@ -575,9 +577,20 @@
             }
             let toolbar = [...toolbarHost.children].find(child => child.classList.contains('yt-tweaks-card-actions'));
             if (!toolbar) {
+                // Przenieś pasek z poprzedniej wersji, jeśli skrypt zaktualizował się bez przeładowania.
+                toolbar = info.anchor.querySelector('.yt-tweaks-card-actions');
+                if (toolbar) toolbarHost.appendChild(toolbar);
+            }
+            if (!toolbar) {
                 toolbar = document.createElement('div');
                 toolbar.className = 'yt-tweaks-card-actions';
                 toolbarHost.appendChild(toolbar);
+                diagnosticLog('card-controls-added', {
+                    cardTag: card.tagName.toLocaleLowerCase(),
+                    anchorTag: info.anchor.tagName.toLocaleLowerCase(),
+                    hostTag: toolbarHost.tagName.toLocaleLowerCase(),
+                    outsideLink: toolbar.parentElement !== info.anchor
+                });
             }
 
             let button = toolbar.querySelector('.yt-tweaks-queue-button');
