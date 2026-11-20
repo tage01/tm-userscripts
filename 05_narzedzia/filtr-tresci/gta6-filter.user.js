@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Filtr treści – GTA 6
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.3
+// @version      1.0.4
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/filtr-tresci/gta6-filter.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/filtr-tresci/gta6-filter.user.js
 // @description  Ukrywa posty, artykuły, wyniki i karty związane z GTA 6.
 // @match        *://*/*
+// @exclude      https://tage01.github.io/tm-userscripts/*
 // @grant        GM_addStyle
 // @grant        GM_getValue
 // @grant        GM_setValue
