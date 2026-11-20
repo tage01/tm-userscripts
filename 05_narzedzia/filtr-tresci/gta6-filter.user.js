@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Filtr treści – GTA 6
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.0
+// @version      1.0.1
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/filtr-tresci/gta6-filter.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/filtr-tresci/gta6-filter.user.js
 // @description  Ukrywa posty, artykuły, wyniki i karty związane z GTA 6.
@@ -202,6 +202,48 @@
         if (document.body) scanRoot(document.body);
     }
 
+    function isNearViewport(element) {
+        if (!(element instanceof HTMLElement) || element.classList.contains(HIDDEN_CLASS)) return false;
+        const rect = element.getBoundingClientRect();
+        const margin = Math.max(500, window.innerHeight * 0.75);
+        return rect.bottom >= -margin && rect.top <= window.innerHeight + margin;
+    }
+
+    function scanViewport() {
+        if (!enabled.value || !document.body) return;
+
+        const visibleCards = elementAndDescendants(document.body, CARD_SELECTOR).filter(card =>
+            isNearViewport(card) && isUsableCard(card, card.matches(SEMANTIC_CARD_SELECTOR))
+        );
+        const visibleCardSet = new Set(visibleCards);
+
+        // Skanuj tylko zewnętrzne karty w zasięgu scrolla; ich poddrzewa obejmują
+        // również zagnieżdżone tytuły i metadane.
+        const cardRoots = visibleCards.filter(card => {
+            let ancestor = card.parentElement;
+            while (ancestor && ancestor !== document.body) {
+                if (visibleCardSet.has(ancestor)) return false;
+                ancestor = ancestor.parentElement;
+            }
+            return true;
+        });
+        cardRoots.forEach(scanRoot);
+
+        // Awaryjnie obsłuż strony bez rozpoznawalnych kart, ale tylko w pobliżu
+        // widoku, żeby nie skanować całej strony przy każdym scrollu.
+        const fallbackElements = elementAndDescendants(
+            document.body,
+            `${TEXT_BLOCK_SELECTOR},${METADATA_SELECTOR}`
+        );
+        fallbackElements.forEach(element => {
+            if (!isNearViewport(element)
+                || element.closest(EXCLUDED_SELECTOR)
+                || !containsGTA6(element)) return;
+            const target = nearestCard(element) || fallbackTarget(element);
+            if (target) setHidden(target, true);
+        });
+    }
+
     function clearHidden() {
         hiddenElements.forEach(element => {
             if (element.isConnected) element.classList.remove(HIDDEN_CLASS);
@@ -225,6 +267,9 @@
 
     let scanTimer = 0;
     const pendingRoots = new Set();
+    let scrollScanTimer = 0;
+    let lastScrollScanAt = 0;
+    const SCROLL_SCAN_INTERVAL = 650;
 
     function scheduleScan(root) {
         if (root) pendingRoots.add(root);
@@ -244,6 +289,16 @@
         const element = node instanceof Element ? node : node?.parentElement;
         if (!element) return document.body;
         return nearestCard(element) || element;
+    }
+
+    function scheduleScrollScan() {
+        if (!enabled.value || scrollScanTimer) return;
+        const delay = Math.max(0, SCROLL_SCAN_INTERVAL - (Date.now() - lastScrollScanAt));
+        scrollScanTimer = setTimeout(() => {
+            scrollScanTimer = 0;
+            lastScrollScanAt = Date.now();
+            scanViewport();
+        }, delay);
     }
 
     function start() {
@@ -266,6 +321,9 @@
             attributes: true,
             attributeFilter: ['title', 'aria-label', 'alt', 'href', 'data-title']
         });
+
+        window.addEventListener('scroll', scheduleScrollScan, { passive: true });
+        document.addEventListener('scroll', scheduleScrollScan, { passive: true, capture: true });
 
         scanPage();
         [800, 2500, 6000].forEach(delay => setTimeout(scanPage, delay));
