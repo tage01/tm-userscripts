@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Filtr treści – GTA 6
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.1
+// @version      1.0.2
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/filtr-tresci/gta6-filter.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/filtr-tresci/gta6-filter.user.js
 // @description  Ukrywa posty, artykuły, wyniki i karty związane z GTA 6.
@@ -19,6 +19,7 @@
 
     const STORAGE_KEY = 'gta6ContentFilter.enabled';
     const HIDDEN_CLASS = 'gta6-content-filter-hidden';
+    const IS_YOUTUBE = /(^|\.)youtube\.com$/i.test(location.hostname);
     const enabled = { value: GM_getValue(STORAGE_KEY, true) };
     const hiddenElements = new Set();
 
@@ -306,6 +307,22 @@
         const observer = new MutationObserver(records => {
             if (!enabled.value) return;
             records.forEach(record => {
+                if (record.type === 'attributes' && record.attributeName === 'class') {
+                    const target = record.target;
+                    if (!(target instanceof HTMLElement)) return;
+
+                    // YouTube potrafi nadpisać class karty przy hoverze. Jeśli
+                    // zniknął nasz znacznik, przywróć go bez ponownego skanowania strony.
+                    if (hiddenElements.has(target)) {
+                        if (!target.classList.contains(HIDDEN_CLASS)) setHidden(target, true);
+                        return;
+                    }
+
+                    const card = nearestCard(target);
+                    if (card) scheduleScan(card);
+                    return;
+                }
+
                 if (record.type === 'childList') {
                     record.addedNodes.forEach(node => scheduleScan(mutationRoot(node)));
                 } else {
@@ -314,12 +331,16 @@
             });
         });
 
+        const attributeFilter = ['title', 'aria-label', 'alt', 'href', 'data-title'];
+        // Nie obserwuj class globalnie: YouTube hover odświeża ten atrybut często.
+        if (IS_YOUTUBE) attributeFilter.push('class');
+
         observer.observe(observeRoot, {
             childList: true,
             subtree: true,
             characterData: true,
             attributes: true,
-            attributeFilter: ['title', 'aria-label', 'alt', 'href', 'data-title']
+            attributeFilter
         });
 
         window.addEventListener('scroll', scheduleScrollScan, { passive: true });
