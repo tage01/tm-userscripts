@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Filtr treści – GTA 6
 // @namespace    https://github.com/tage01/opencode-test
-// @version      1.0.2
+// @version      1.0.3
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/filtr-tresci/gta6-filter.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/05_narzedzia/filtr-tresci/gta6-filter.user.js
 // @description  Ukrywa posty, artykuły, wyniki i karty związane z GTA 6.
@@ -37,6 +37,14 @@
         '[data-testid*="tweet"]',
         '[data-testid*="video"]',
         '[data-testid*="result"]'
+    ].join(',');
+
+    const YOUTUBE_CARD_SELECTOR = [
+        'ytd-rich-item-renderer',
+        'ytd-video-renderer',
+        'ytd-grid-video-renderer',
+        'ytd-compact-video-renderer',
+        'ytd-reel-item-renderer'
     ].join(',');
 
     const GENERIC_CARD_SELECTOR = [
@@ -92,6 +100,11 @@
     }
 
     function nearestCard(element) {
+        if (IS_YOUTUBE) {
+            const youtubeCard = element.closest?.(YOUTUBE_CARD_SELECTOR);
+            if (youtubeCard) return youtubeCard;
+        }
+
         let current = element;
         while (current && current !== document.body && current !== document.documentElement) {
             if (current.matches?.(SEMANTIC_CARD_SELECTOR) && isUsableCard(current, true)) return current;
@@ -160,7 +173,12 @@
             }
         });
         const leafMatches = [...matchingCards].filter(card => !matchingAncestors.has(card));
-        leafMatches.forEach(card => setHidden(card, true));
+        leafMatches.forEach(card => {
+            const target = IS_YOUTUBE
+                ? card.closest(YOUTUBE_CARD_SELECTOR) || card
+                : card;
+            setHidden(target, true);
+        });
 
         // Fallback dla stron bez rozpoznawalnych kontenerów oraz dla tekstu
         // zapisanego wyłącznie w title, aria-label, alt albo adresie linku.
