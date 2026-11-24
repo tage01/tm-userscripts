@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Unified Video Downloader
 // @namespace    http://tampermonkey.net/
-// @version      1.7
+// @version      1.8
 // @downloadURL  https://raw.githubusercontent.com/tage01/tm-userscripts/main/01_downloaders/pobieranie-filmow/unified-video-downloader.user.js
 // @updateURL    https://raw.githubusercontent.com/tage01/tm-userscripts/main/01_downloaders/pobieranie-filmow/unified-video-downloader.user.js
-// @description  Zunifikowany downloader wideo: eporner + KVS (webpussi/camgirlfap/porn4fans/pimpbunny/sheeshfans) + tnaflix + dirtyship + mat6tube + freemiumgirls + thotchicks (AES+HLS) + pornx (packer+HLS) + yesporn (iframe player-x) + livecamrips (MixDrop) + fallback generyczny + mini-kolejka
+// @description  Zunifikowany downloader wideo: eporner + KVS (webpussi/camgirlfap/porn4fans/pimpbunny/sheeshfans) + tnaflix + dirtyship + mat6tube + freemiumgirls + thotchicks (AES+HLS) + pornx (packer+HLS) + yesporn (iframe player-x) + livecamrips (MixDrop) + noodlemagazine (window.playlist) + fallback generyczny + mini-kolejka
 // @author       opencode
 // @match        *://*.eporner.com/hd-porn/*
 // @match        *://*.eporner.com/video-*
@@ -58,6 +58,8 @@
 // @match        *://*.yespornpleasexxx.com/*
 // @match        *://livecamrips.to/*
 // @match        *://*.livecamrips.to/*
+// @match        *://noodlemagazine.com/watch/*
+// @match        *://*.noodlemagazine.com/watch/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=eporner.com
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
@@ -111,6 +113,8 @@
 // @connect      *.mxdrop.click
 // @connect      mxcontent.net
 // @connect      *.mxcontent.net
+// @connect      noodlemagazine.com
+// @connect      *.pvvstream.pro
 // @connect      tnaflix.com
 // @connect      *
 // @run-at       document-idle
@@ -1296,6 +1300,41 @@
                         catch (e) { log('yesporn: player-x błąd:', e); }
                     }
                 }
+                return out;
+            },
+        },
+        {
+            id: 'noodle', label: 'NoodleMagazine',
+            test: (h) => h.includes('noodlemagazine.com'),
+            getTitle: () => {
+                const h1 = document.querySelector('.video_info h1');
+                if (h1) {
+                    const clone = h1.cloneNode(true);
+                    clone.querySelectorAll('i, span').forEach((s) => s.remove());
+                    if (clone.textContent.trim()) return sanitize(clone.textContent.trim());
+                }
+                return titleFromSelectors(null, /\s*[-|].*noodlemagazine.*$/i);
+            },
+            getSources: async () => {
+                // window.playlist (JW Player 8) w inline <script>: sources[{file,label}] na pvvstream.pro
+                // z tokenem secure=… (wygasa po kilku godzinach); MP4 działa bez Referer.
+                const out = [];
+                const seen = new Set();
+                document.querySelectorAll('script:not([src])').forEach((el) => {
+                    const txt = el.textContent || '';
+                    if (!txt.includes('window.playlist')) return;
+                    const mm = txt.match(/window\.playlist\s*=\s*(\{.+?\});/s);
+                    if (!mm) return;
+                    try {
+                        const pl = JSON.parse(mm[1]);
+                        (pl.sources || []).forEach((s) => {
+                            if (!s || !s.file || seen.has(s.file)) return;
+                            seen.add(s.file);
+                            out.push({ kind: 'mp4', label: String(s.label || 'mp4') + 'p', url: s.file, ext: 'mp4' });
+                        });
+                    } catch (e) { log('noodle: playlist błąd:', e); }
+                });
+                out.sort((a, b) => qualityRank(a.label) - qualityRank(b.label));
                 return out;
             },
         },
